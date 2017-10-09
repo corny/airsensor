@@ -9,7 +9,7 @@ This Arduino project implements an indoor air quality sensor based on the [ESP82
 * [NodeMCU](https://en.wikipedia.org/wiki/NodeMCU) 1.0 (ESP-12E)
 * [MH-Z19](http://www.winsen-sensor.com/products/ndir-co2-sensor/mh-z19.html) or MH-Z18 CO2 sensor
 * [Bosch BME280](https://www.bosch-sensortec.com/bst/products/all_products/bme280) sensor (I²C) for temperature, humidity and pressure
-* SSD1306 OLED display (I²C)
+* [SSD1306](https://www.espruino.com/SSD1306) OLED display (I²C)
 
 
 ## Data transmission
