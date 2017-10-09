@@ -3,6 +3,7 @@ Airsensor
 
 This Arduino project implements an indoor air quality sensor based on the [ESP8266](https://en.wikipedia.org/wiki/ESP8266).
 
+![Assembly](/images/assembly.jpg)
 
 ## Components
 
