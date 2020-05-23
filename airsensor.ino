@@ -1,21 +1,26 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <PubSubClient.h>
-#include <Adafruit_BME280.h>
 #include <Wire.h>
-#include <SSD1306.h>
+#include <Adafruit_BME280.h>
+#include <Adafruit_SSD1306.h>
 #include "settings.h"
 
 const int baudrate = 115200;
+
 #define SDA D3
 #define SDC D4
+
+#define OLED_RESET -1
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
 #ifdef MQTT
 WiFiClient espClient;
 PubSubClient client(espClient);
 #endif
 
-SSD1306 display(0x3c, SDC, SDA);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 bool has_display;
 
 // BME280, Luftdruck-Sensor
@@ -173,11 +178,11 @@ void displayWifiStatus(String status) {
   if (!has_display)
     return;
 
-  display.clear();
-  display.drawString(0,  0, hostString);
-  display.drawString(0, 10, String("SSID: ") + wifi_ssid);
+  display.clearDisplay();
+  display.println(hostString);
+  display.println(String("SSID: ") + wifi_ssid);
   if (status != "")
-    display.drawString(0, 20, status);
+    display.println(status);
   display.display();
 }
 
@@ -229,18 +234,19 @@ void initWifi() {
 }
 
 void displayData() {
-  display.clear();
+  display.clearDisplay();
+  display.setCursor(0,0);
 
   if (bme280_result.valid) {
-    display.drawString(0, 0, String("Temperature: ") + Float2String(bme280_result.t) + String(" °C"));
-    display.drawString(0, 10, String("Humidity: ") + Float2String(bme280_result.h) + String(" %"));
-    display.drawString(0, 20, String("Pressure: ") + Float2String(bme280_result.p/100) + String(" hPa"));
+    display.println(String("Temperature: ") + Float2String(bme280_result.t) + String(" °C"));
+    display.println(String("Humidity: ") + Float2String(bme280_result.h) + String(" %"));
+    display.println(String("Pressure: ") + Float2String(bme280_result.p/100) + String(" hPa"));
   }
 
   if (zh18_result.valid) {
-    display.drawString(0, 40, String("CO2: ") + zh18_result.ppm + String(" ppm"));
+    display.println(String("CO2: ") + zh18_result.ppm + String(" ppm"));
   }else{
-    display.drawString(0, 40, String("CO2: -"));
+    display.println(String("CO2: -"));
   }
 
   display.display();
@@ -306,22 +312,31 @@ void sendData() {
 }
 
 void initDisplay(){
-  Wire.beginTransmission (0x3C);
+  Wire.beginTransmission(0x3C);
 
   if (Wire.endTransmission () != 0) {
     has_display = false;
     Serial.printf("[display] not found on: 0x3c\n");
+    return;
   }
 
   Serial.printf("[display] found on: 0x3c\n");
-  display.init();
-  display.flipScreenVertically();
-  display.setFont(ArialMT_Plain_10);
+
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if(!display.begin(SSD1306_EXTERNALVCC, 0x3D)) { // Address 0x3D for 128x64
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;); // Don't proceed, loop forever
+  }
+
+  Serial.printf("[display] started\n");
+
+  // display.setRotation(2);
   has_display = true;
 }
 
 void setup() {
   Serial.begin(baudrate);
+  Serial.println("");
 
   Wire.pins(SDC, SDA);
   Wire.begin(SDC, SDA);
@@ -332,9 +347,12 @@ void setup() {
   Serial.printf("\nHostname: %s\n", hostString);
 
   if (has_display){
-    display.clear();
-    display.drawString(0, 0, "Booting ...");
-    display.drawString(0, 10, hostString);
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(0,0);
+    display.println("Booting ...");
+    display.println(hostString);
     display.display();
   }
 
