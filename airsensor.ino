@@ -1,9 +1,9 @@
 #include <ESP8266WiFi.h>
-#include <ESP8266HTTPClient.h>
 #include <PubSubClient.h>
 #include <Wire.h>
 #include <Adafruit_BME280.h>
 #include <Adafruit_SSD1306.h>
+#include <AddrList.h>
 #include "settings.h"
 
 const int baudrate = 115200;
@@ -46,7 +46,7 @@ char hostString[20] = {0};
 // All timestamps/periods in milliseconds
 unsigned long uptime = 0;
 unsigned long last_send = 0;
-const unsigned long sending_interval = 10*1000;
+const unsigned long sending_interval = 15*1000;
 
 
 void debugf(char *fmt, ... ){
@@ -186,6 +186,53 @@ void displayWifiStatus(String status) {
   display.display();
 }
 
+
+long lastReconnectAttempt = 0;
+
+boolean reconnect() {
+  if (client.connect("arduinoClient")) {
+    // Once connected, publish an announcement...
+    client.publish("outTopic","just reconnected");
+    // ... and resubscribe
+    client.subscribe("inTopic");
+  }
+  return client.connected();
+}
+
+
+void status(Print& out) {
+  out.println(F("------------------------------"));
+  out.println(ESP.getFullVersion());
+
+  for (int i = 0; i < DNS_MAX_SERVERS; i++) {
+    IPAddress dns = WiFi.dnsIP(i);
+    if (dns.isSet()) {
+      out.printf("dns%d: %s\n", i, dns.toString().c_str());
+    }
+  }
+
+  out.println(F("Try me at these addresses:"));
+  out.println(F("(with 'telnet <addr> or 'nc -u <addr> 23')"));
+  for (auto a : addrList) {
+    out.printf("IF='%s' IPv6=%d local=%d hostname='%s' addr= %s",
+               a.ifname().c_str(),
+               a.isV6(),
+               a.isLocal(),
+               a.ifhostname(),
+               a.toString().c_str());
+
+    if (a.isLegacy()) {
+      out.printf(" / mask:%s / gw:%s",
+                 a.netmask().toString().c_str(),
+                 a.gw().toString().c_str());
+    }
+
+    out.println();
+
+  }
+  out.println(F("------------------------------"));
+}
+
 void connectWifi() {
   Serial.printf("Connecting to %s ", wifi_ssid);
   displayWifiStatus("");
@@ -215,6 +262,8 @@ void connectWifi() {
     delay(100);
   }
   Serial.println(" done");
+  
+  status(Serial);
 }
 
 void initWifi() {
@@ -256,59 +305,30 @@ void sendData() {
   String data, url;
 
   // Build data
-  data = "";
-  data += F("sensors,host=");
-  data += hostString;
-  data += F(",location=");
-  data += location;
-  data += " ";
+  data = "{";
+  data += F("\"uptime\":");
+  data += String(uptime/1000);
 
   if (bme280_result.valid) {
-    data += F("temperature=");
+    data += F(", \"temperature\":");
     data += Float2String(bme280_result.t);
-    data += F(",humidity=");
+    data += F(", \"humidity\":");
     data += Float2String(bme280_result.h);
-    data += F(",pressure=");
-    data += Float2String(bme280_result.p);
-    data += F(",");
+    data += F(", \"pressure\":");
+    data += Float2String(bme280_result.p/100);
   }
 
   if (zh18_result.valid) {
-    data += F("co2=");
+    data += F(", \"co2\":");
     data += Float2String(zh18_result.ppm);
-    data += F(",");
   }
 
-  if (!data.endsWith(",")){
-    debugf("No data available\n");
-    return;
-  }
-
-  data += F("uptime=");
-  data += String(uptime/1000);
-
-  // Build URL
-  url = String(influx_url);
-  url += F("write?precision=s&db=");
-  url += influx_database;
+  data += F("}");
 
 #ifdef MQTT
   // Send data to MQTT
   client.publish(mqtt_topic, String(data).c_str(), true);
 #endif
-
-  // Send data to InfluxDB
-  HTTPClient http;
-  http.begin(url);
-  http.setAuthorization(influx_user, influx_pass);
-  http.addHeader("Content-Type", "text/plain");
-  int status = http.POST(data);
-  if (status != 204) {
-    Serial.printf("[http] unexpected status code: %d\n", status);
-    http.writeToStream(&Serial);
-  }
-  http.end();
-
 }
 
 void initDisplay(){
@@ -360,6 +380,7 @@ void setup() {
   initWifi();
 
 #ifdef MQTT
+  Serial.printf("Using MQTT server %s\n", mqtt_server);
   client.setServer(mqtt_server, 1883);
 #endif
 
@@ -376,6 +397,23 @@ void setup() {
 
 
 void loop() {
+
+
+  if (!client.connected()) {
+    long now = millis();
+    if (now - lastReconnectAttempt > 5000) {
+      lastReconnectAttempt = now;
+      // Attempt to reconnect
+      if (reconnect()) {
+        lastReconnectAttempt = 0;
+      }
+    }
+  } else {
+    // Client connected
+    client.loop();
+  }
+  
+  
   uptime = millis();
 
   // uptime restarted at zero? (overflow after 50 days)
